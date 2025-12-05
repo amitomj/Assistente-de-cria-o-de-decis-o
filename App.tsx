@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, Loader2, Scale, Download, Eye, Edit2, FileText, ChevronLeft, Info, RefreshCw, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Trash2, Loader2, Scale, Download, Eye, Edit2, FileText, ChevronLeft, Info, RefreshCw, X, Key, LogOut, ExternalLink } from 'lucide-react';
 import { FileUpload } from './components/FileUpload';
 import { extractCaseData } from './services/geminiService';
 import { generateDocx } from './services/docGenerator';
@@ -8,6 +8,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const App: React.FC = () => {
+  const [apiKey, setApiKey] = useState<string>('');
+  const [showKeyInput, setShowKeyInput] = useState<boolean>(true);
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [sentenceFile, setSentenceFile] = useState<File | null>(null);
   const [appealPairs, setAppealPairs] = useState<AppealPair[]>([
@@ -16,6 +18,30 @@ const App: React.FC = () => {
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+
+  useEffect(() => {
+    const storedKey = localStorage.getItem('gemini_api_key');
+    if (storedKey) {
+      setApiKey(storedKey);
+      setShowKeyInput(false);
+    }
+  }, []);
+
+  const handleSaveKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (apiKey.trim()) {
+      localStorage.setItem('gemini_api_key', apiKey.trim());
+      setShowKeyInput(false);
+    }
+  };
+
+  const handleClearKey = () => {
+    localStorage.removeItem('gemini_api_key');
+    setApiKey('');
+    setShowKeyInput(true);
+    setStatus(AppStatus.IDLE);
+    setCaseData(null);
+  };
 
   const addAppealPair = () => {
     setAppealPairs([
@@ -51,12 +77,17 @@ const App: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      const data = await extractCaseData(sentenceFile, appealPairs);
+      // Pass the API Key to the service
+      const data = await extractCaseData(apiKey, sentenceFile, appealPairs);
       setCaseData(data);
       setStatus(AppStatus.REVIEW);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setErrorMsg("Ocorreu um erro ao processar. Verifique a sua ligação ou os ficheiros.");
+      let msg = "Ocorreu um erro ao processar. Verifique os ficheiros.";
+      if (err.message && (err.message.includes("API Key") || err.message.includes("403") || err.message.includes("401"))) {
+        msg = "Chave de API inválida ou expirada. Por favor verifique a sua chave.";
+      }
+      setErrorMsg(msg);
       setStatus(AppStatus.ERROR);
     }
   };
@@ -75,7 +106,61 @@ const App: React.FC = () => {
     setErrorMsg(null);
   };
 
+  const renderApiKeyScreen = () => (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 animate-fade-in">
+       <div className="bg-card-bg border border-slate-700 p-8 rounded-xl shadow-2xl max-w-md w-full">
+          <div className="flex flex-col items-center mb-6">
+             <div className="bg-primary/20 p-3 rounded-full mb-4">
+                <Key className="w-8 h-8 text-primary" />
+             </div>
+             <h2 className="text-xl font-bold text-white text-center">Configuração da API</h2>
+             <p className="text-slate-400 text-center text-sm mt-2">
+               Para utilizar a Inteligência Artificial, é necessário uma chave da Google Gemini API.
+             </p>
+          </div>
+
+          <form onSubmit={handleSaveKey} className="space-y-4">
+            <div>
+              <label className="block text-xs uppercase font-bold text-slate-500 mb-1">Chave API (Google Gemini)</label>
+              <input 
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Ex: AIzaSy..."
+                className="w-full bg-input-bg border border-slate-600 rounded px-3 py-2 text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder-slate-500"
+                required
+              />
+            </div>
+            
+            <button 
+              type="submit"
+              className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-3 rounded transition-colors shadow-lg shadow-primary/20"
+            >
+              Entrar
+            </button>
+          </form>
+
+          <div className="mt-6 pt-6 border-t border-slate-700">
+             <a 
+               href="https://aistudio.google.com/app/apikey" 
+               target="_blank" 
+               rel="noopener noreferrer"
+               className="flex items-center justify-center gap-2 text-primary hover:text-white transition-colors text-sm font-medium group"
+             >
+               <ExternalLink className="w-4 h-4" />
+               Obter chave gratuita no Google AI Studio
+             </a>
+             <p className="text-center text-xs text-slate-500 mt-2">
+               A chave é guardada apenas no seu navegador.
+             </p>
+          </div>
+       </div>
+    </div>
+  );
+
   const renderContent = () => {
+    if (showKeyInput) return renderApiKeyScreen();
+
     // LOADING STATE
     if (status === AppStatus.PROCESSING) {
       return (
@@ -286,6 +371,7 @@ const App: React.FC = () => {
   };
 
   const getFooterActions = () => {
+    if (showKeyInput) return null;
     if (status === AppStatus.PROCESSING) return null;
 
     if (status === AppStatus.REVIEW) {
@@ -339,7 +425,18 @@ const App: React.FC = () => {
     <div className="relative flex min-h-screen w-full flex-col font-sans bg-app-bg text-white selection:bg-primary selection:text-white">
       
       {/* Centered Header like image */}
-      <header className="flex flex-col items-center justify-center pt-8 pb-6 px-4 space-y-1">
+      <header className="flex flex-col items-center justify-center pt-8 pb-6 px-4 space-y-1 relative">
+         <div className="absolute top-4 right-4">
+           {!showKeyInput && (
+             <button 
+               onClick={handleClearKey}
+               title="Alterar Chave API"
+               className="text-slate-500 hover:text-white transition-colors"
+             >
+               <LogOut className="w-5 h-5" />
+             </button>
+           )}
+         </div>
          <h1 className="text-2xl md:text-3xl font-bold text-center leading-tight">
            Assistente de Elaboração de Acórdão
          </h1>
@@ -350,7 +447,7 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-grow p-4 w-full max-w-3xl mx-auto">
-        {status === AppStatus.REVIEW && (
+        {!showKeyInput && status === AppStatus.REVIEW && (
           <div className="mb-4">
             <button 
               onClick={() => setStatus(AppStatus.IDLE)} 
@@ -366,7 +463,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Footer Area */}
-      {status !== AppStatus.PROCESSING && (
+      {status !== AppStatus.PROCESSING && !showKeyInput && (
         <div className="p-6 max-w-3xl mx-auto w-full mb-8">
            {getFooterActions()}
         </div>

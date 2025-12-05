@@ -33,11 +33,14 @@ const fileToPart = async (file: File) => {
 };
 
 export const extractCaseData = async (
+  apiKey: string,
   sentenceFile: File,
   appealPairs: AppealPair[]
 ): Promise<CaseData> => {
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    if (!apiKey) throw new Error("API Key em falta.");
+    
+    const ai = new GoogleGenAI({ apiKey: apiKey });
 
     // Prepare parts
     const parts: any[] = [];
@@ -78,7 +81,12 @@ export const extractCaseData = async (
 
       <<<FACTOS_PROVADOS>>>
       (Copie integralmente os factos provados da sentença. Mantenha a numeração original.)
-      (SE HOUVER TABELAS: Converta-as para tabelas Markdown visualmente alinhadas. Ex: | Col1 | Col2 |)
+      (SE HOUVER TABELAS: Converta-as para tabelas Markdown visualmente alinhadas. TUDO o que for tabela deve ser formatado rigorosamente assim:
+      | Coluna 1 | Coluna 2 |
+      |---|---|
+      | Dado A | Dado B |
+      
+      IMPORTANTE: Todas as linhas da tabela DEVEM começar e terminar com '|'.)
 
       <<<FACTOS_NAO_PROVADOS>>>
       (Copie integralmente os factos não provados, se houver.)
@@ -95,6 +103,9 @@ export const extractCaseData = async (
       FONTE: (Ex: "Recorrente: Autor João" ou "Recorrido: Réu Empresa X")
       CONTEUDO: (Copie as conclusões numeradas)
       ---SEPARADOR_ITEM---
+      
+      <<<IMAGENS>>>
+      (Se existirem imagens/figuras no meio dos factos provados, descreva-as aqui brevemente indicando a sua posição original, pois não consigo copiar imagens diretamente.)
     `;
 
     const response = await ai.models.generateContent({
