@@ -56,7 +56,7 @@ const App: React.FC = () => {
       setStatus(AppStatus.REVIEW);
     } catch (err) {
       console.error(err);
-      setErrorMsg("Ocorreu um erro ao processar. Tente novamente.");
+      setErrorMsg("Ocorreu um erro ao processar. Verifique a sua ligação ou os ficheiros.");
       setStatus(AppStatus.ERROR);
     }
   };
@@ -87,9 +87,9 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="text-center space-y-2">
-            <h3 className="text-xl font-bold text-white">A processar documentos</h3>
+            <h3 className="text-xl font-bold text-white">A analisar documentos com IA</h3>
             <p className="text-slate-400 max-w-xs mx-auto">
-              A IA está a analisar a sentença e os recursos para estruturar o seu acórdão.
+              O modelo Gemini está a ler a sentença e os recursos, a identificar os factos provados e a estruturar o projeto de acórdão.
             </p>
           </div>
         </div>
@@ -108,7 +108,7 @@ const App: React.FC = () => {
              <div>
                 <p className="text-white font-bold text-base">Análise Concluída</p>
                 <p className="text-slate-300 text-sm mt-1">
-                  Verifique os dados extraídos abaixo antes de exportar o documento final.
+                  A IA extraiu os dados abaixo. Verifique e edite conforme necessário antes de exportar o documento final.
                 </p>
              </div>
           </section>
@@ -116,13 +116,27 @@ const App: React.FC = () => {
           {/* I - Relatorio */}
           <section>
              <h3 className="text-white text-lg font-bold px-1 pb-3 pt-2">I. Relatório</h3>
-             <div className="bg-card-bg border border-slate-700 rounded-lg p-4 space-y-2">
-                <textarea
-                  className="w-full h-40 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
-                  placeholder="Conteúdo do relatório..."
-                  value={caseData.report}
-                  onChange={(e) => setCaseData({...caseData, report: e.target.value})}
-                />
+             <div className="bg-card-bg border border-slate-700 rounded-lg p-4 space-y-4">
+                <div className="space-y-2">
+                    <label className="text-xs text-slate-400 uppercase font-bold">Texto do Relatório</label>
+                    <textarea
+                      className="w-full h-40 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
+                      placeholder="Conteúdo do relatório..."
+                      value={caseData.report}
+                      onChange={(e) => setCaseData({...caseData, report: e.target.value})}
+                    />
+                </div>
+                
+                <div className="space-y-2 pt-2 border-t border-slate-600">
+                    <label className="text-xs text-slate-400 uppercase font-bold">Decisão da 1ª Instância (Parte final do Relatório)</label>
+                    <p className="text-xs text-slate-500 italic mb-1">Será antecedida pela frase: "Foi proferida sentença que"</p>
+                    <textarea
+                      className="w-full h-24 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
+                      placeholder="Decisão da 1ª Instância..."
+                      value={caseData.decisionFirstInstance}
+                      onChange={(e) => setCaseData({...caseData, decisionFirstInstance: e.target.value})}
+                    />
+                </div>
              </div>
           </section>
 
@@ -315,7 +329,7 @@ const App: React.FC = () => {
             `}
          >
             <FileText className="w-5 h-5" />
-            Calcular Acórdão
+            Selecionar Texto
          </button>
       </div>
     );
