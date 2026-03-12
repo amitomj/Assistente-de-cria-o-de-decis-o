@@ -1,9 +1,30 @@
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from "@google/genai";
+import { GoogleGenAI, HarmCategory, HarmBlockThreshold, Type } from "@google/genai";
 import { CaseData, AppealPair } from "../types";
+import mammoth from "mammoth";
 
-// Helper to convert File to Base64
-const fileToPart = async (file: File) => {
-  return new Promise<{ inlineData: { data: string; mimeType: string } }>((resolve, reject) => {
+// Helper to convert File to Part (handling .docx conversion)
+const fileToPart = async (file: File): Promise<any> => {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  
+  // Special handling for .docx since Gemini API doesn't support it directly
+  if (ext === 'docx') {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      // Use convertToHtml to preserve some structural/style information for the AI
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      return { 
+        text: `[CONTEÚDO DO DOCUMENTO DOCX (Convertido para HTML para preservação de estrutura)]:\n${result.value}` 
+      };
+    } catch (error) {
+      console.error("Erro ao converter DOCX:", error);
+      // Fallback to raw text if HTML conversion fails
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.extractRawText({ arrayBuffer });
+      return { text: `[CONTEÚDO DO DOCUMENTO DOCX (Texto Simples)]:\n${result.value}` };
+    }
+  }
+
+  return new Promise<any>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       const base64String = (reader.result as string).split(',')[1];
@@ -11,9 +32,7 @@ const fileToPart = async (file: File) => {
       // Robust MIME type fallback
       let mimeType = file.type;
       if (!mimeType) {
-        const ext = file.name.split('.').pop()?.toLowerCase();
         if (ext === 'pdf') mimeType = 'application/pdf';
-        else if (ext === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
         else if (ext === 'txt') mimeType = 'text/plain';
       }
 
@@ -96,20 +115,33 @@ export const extractCaseData = async (
 
       <<<CONCLUSOES_RECURSOS>>>
       (Liste as conclusões. Mantenha a ordem cronológica dos recursos.)
-      (IMPORTANTE: Para cada recurso identificado, extraia PRIMEIRO as conclusões do recurso e, IMEDIATAMENTE DEPOIS, as conclusões da resposta/contra-alegações correspondente, se houver.)
+      (IMPORTANTE: Para cada recurso identificado, extraia PRIMEIRO as conclusões do recurso e, IMEDIATAMENTE DEPOIS, as conclusões da resposta/contra-alegações correspondente, se houver. Se a resposta/contra-alegação não tiver conclusões explícitas, forneça um resumo claro da posição assumida quanto às várias questões suscitadas no recurso.)
       
       (Utilize este formato exato para CADA item:)
       TIPO: (Escreva apenas "RECURSO" ou "RESPOSTA")
       FONTE: (Ex: "Recorrente: Autor João" ou "Recorrido: Réu Empresa X")
-      CONTEUDO: (Copie as conclusões numeradas)
+      CONTEUDO: (Copie as conclusões ou forneça o resumo se for uma resposta sem conclusões. IMPORTANTE: Se as conclusões estiverem amontoadas num único parágrafo no texto original, separe-as obrigatoriamente por parágrafos, garantindo que cada número romano (I, II, III...), número (1., 2...) ou alínea (a), b)...) comece numa nova linha.)
       ---SEPARADOR_ITEM---
+
+      <<<QUESTOES_A_DECIDIR>>>
+      (Interprete APENAS as conclusões dos recursos - ignore as respostas/contra-alegações para esta secção - e indique, por tópicos, as questões suscitadas que o tribunal deve decidir. Indique expressamente todos os pontos da matéria de facto que são objeto de impugnação.)
+      (Apresente o texto EXATAMENTE neste modelo, sem o texto introdutório legal que será adicionado automaticamente:)
+      Recurso 1
+      - questão a
+      - questão b
+      Recurso 2
+      - questão a
+      - questão b
+
+      <<<FACTOS_IMPUGNADOS>>>
+      (Indique todos os pontos da matéria de facto objeto de impugnação nos recursos.)
       
       <<<IMAGENS>>>
       (Se existirem imagens/figuras no meio dos factos provados, descreva-as aqui brevemente indicando a sua posição original, pois não consigo copiar imagens diretamente.)
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       contents: [{ parts }],
       config: {
         systemInstruction,
@@ -139,6 +171,8 @@ export const extractCaseData = async (
     const provenFacts = extractSection('<<<FACTOS_PROVADOS>>>');
     const unprovenFacts = extractSection('<<<FACTOS_NAO_PROVADOS>>>');
     const decisionFirstInstance = extractSection('<<<DECISAO_PRIMEIRA_INSTANCIA>>>');
+    const appealQuestions = extractSection('<<<QUESTOES_A_DECIDIR>>>');
+    const impugnedFacts = extractSection('<<<FACTOS_IMPUGNADOS>>>');
     
     const conclusionsRaw = extractSection('<<<CONCLUSOES_RECURSOS>>>');
     
@@ -184,7 +218,9 @@ export const extractCaseData = async (
       provenFacts: provenFacts || "Não foi possível extrair os factos provados.",
       unprovenFacts: unprovenFacts || "Nada a consignar.",
       decisionFirstInstance: decisionFirstInstance || "Não foi possível extrair a decisão.",
-      appealConclusions: appealConclusions.length > 0 ? appealConclusions : [{ type: 'RECURSO', source: "Sistema", content: "Não foram encontradas conclusões explícitas." }]
+      appealConclusions: appealConclusions.length > 0 ? appealConclusions : [{ type: 'RECURSO', source: "Sistema", content: "Não foram encontradas conclusões explícitas." }],
+      appealQuestions: appealQuestions || "Não foi possível identificar as questões a decidir.",
+      impugnedFacts: impugnedFacts || "Não foi identificada impugnação da matéria de facto."
     };
 
   } catch (error) {

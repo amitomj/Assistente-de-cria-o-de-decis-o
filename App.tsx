@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Loader2, Scale, Download, Eye, Edit2, FileText, ChevronLeft, Info, RefreshCw, X, Key, LogOut, ExternalLink } from 'lucide-react';
+import { Plus, Trash2, Loader2, Scale, Download, Eye, Edit2, FileText, ChevronLeft, Info, RefreshCw, X, Key, LogOut, ExternalLink, Settings, Save, Upload } from 'lucide-react';
 import { FileUpload } from './components/FileUpload';
 import { extractCaseData } from './services/geminiService';
 import { generateDocx } from './services/docGenerator';
-import { AppealPair, CaseData, AppStatus } from './types';
+import { AppealPair, CaseData, AppStatus, TemplateSettings } from './types';
+import { COMMON_FONTS, DEFAULT_TEMPLATE } from './constants';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -18,12 +19,49 @@ const App: React.FC = () => {
   const [caseData, setCaseData] = useState<CaseData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [previews, setPreviews] = useState<any>({
+    report: false,
+    provenFacts: true,
+    unprovenFacts: true,
+    decisionFirstInstance: false,
+    appealQuestions: false,
+    impugnedFacts: false,
+    conclusions: {}
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const [templateSettings, setTemplateSettings] = useState<TemplateSettings>(DEFAULT_TEMPLATE);
 
   useEffect(() => {
     const storedKey = localStorage.getItem('gemini_api_key');
     if (storedKey) {
       setApiKey(storedKey);
       setShowKeyInput(false);
+    }
+
+    const storedTemplate = localStorage.getItem('template_settings');
+    if (storedTemplate) {
+      try {
+        const parsed = JSON.parse(storedTemplate);
+        // Deep merge top-level style objects to ensure all nested properties (like indentLeft) exist
+        const merged = { ...DEFAULT_TEMPLATE };
+        
+        Object.keys(DEFAULT_TEMPLATE).forEach(key => {
+          const k = key as keyof TemplateSettings;
+          if (typeof DEFAULT_TEMPLATE[k] === 'object' && DEFAULT_TEMPLATE[k] !== null && parsed[k]) {
+            merged[k] = { 
+              ...DEFAULT_TEMPLATE[k], 
+              ...parsed[k] 
+            };
+          } else if (parsed[k] !== undefined) {
+            (merged as any)[k] = parsed[k];
+          }
+        });
+        
+        setTemplateSettings(merged);
+      } catch (e) {
+        console.error("Erro ao carregar modelo salvo:", e);
+        setTemplateSettings(DEFAULT_TEMPLATE);
+      }
     }
   }, []);
 
@@ -82,11 +120,21 @@ const App: React.FC = () => {
       setCaseData(data);
       setStatus(AppStatus.REVIEW);
     } catch (err: any) {
-      console.error(err);
-      let msg = "Ocorreu um erro ao processar. Verifique os ficheiros.";
-      if (err.message && (err.message.includes("API Key") || err.message.includes("403") || err.message.includes("401"))) {
-        msg = "Chave de API inválida ou expirada. Por favor verifique a sua chave.";
+      console.error("Erro no processamento:", err);
+      let msg = "Ocorreu um erro ao processar os documentos. ";
+      
+      if (err.message) {
+        if (err.message.includes("API Key") || err.message.includes("403") || err.message.includes("401")) {
+          msg = "Chave de API inválida ou sem permissões. Por favor, verifique a sua chave no Google AI Studio.";
+        } else if (err.message.includes("model not found") || err.message.includes("503")) {
+          msg = "O serviço da Google está temporariamente indisponível ou o modelo não foi encontrado. Tente novamente em instantes.";
+        } else if (err.message.includes("quota") || err.message.includes("429")) {
+          msg = "Limite de requisições excedido. Por favor, aguarde um momento antes de tentar novamente.";
+        } else {
+          msg += `Detalhes: ${err.message}`;
+        }
       }
+      
       setErrorMsg(msg);
       setStatus(AppStatus.ERROR);
     }
@@ -94,7 +142,19 @@ const App: React.FC = () => {
 
   const handleDownload = () => {
     if (caseData) {
-      generateDocx(caseData);
+      generateDocx(caseData, templateSettings);
+    }
+  };
+
+  const saveTemplateSettings = () => {
+    localStorage.setItem('template_settings', JSON.stringify(templateSettings));
+    setShowSettings(false);
+  };
+
+  const resetTemplate = () => {
+    if (window.confirm("Tem a certeza que deseja repor os estilos padrão?")) {
+      setTemplateSettings(DEFAULT_TEMPLATE);
+      localStorage.removeItem('template_settings');
     }
   };
 
@@ -106,8 +166,290 @@ const App: React.FC = () => {
     setErrorMsg(null);
   };
 
+  const handleExportJson = () => {
+    if (!caseData) return;
+    const dataStr = JSON.stringify(caseData, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = 'projeto_acordao.json';
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        // Basic validation
+        if (json.report && json.provenFacts) {
+          setCaseData(json);
+          setStatus(AppStatus.REVIEW);
+          setErrorMsg(null);
+        } else {
+          setErrorMsg("O ficheiro JSON selecionado não parece ser um projeto válido.");
+        }
+      } catch (err) {
+        setErrorMsg("Erro ao ler o ficheiro JSON.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
+
+  const renderSettingsModal = () => {
+    if (!showSettings) return null;
+
+    const styleKeys = [
+      { key: 'normal', label: 'Texto Normal' },
+      { key: 'heading1', label: 'Cabeçalho 1' },
+      { key: 'heading2', label: 'Cabeçalho 2' },
+      { key: 'heading3', label: 'Cabeçalho 3' },
+      { key: 'heading4', label: 'Cabeçalho 4' },
+      { key: 'heading5', label: 'Cabeçalho 5' },
+      { key: 'citation', label: 'Citações' },
+    ];
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="bg-card-bg border border-slate-700 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <Settings className="w-5 h-5 text-primary" />
+              Configurar Estilos do Documento
+            </h2>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={resetTemplate}
+                className="text-xs text-red-400 hover:text-red-300 font-bold uppercase tracking-wider flex items-center gap-1"
+              >
+                <RefreshCw className="w-3 h-3" /> Repor Padrão
+              </button>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          <div className="p-6 overflow-y-auto flex-grow space-y-6 bg-app-bg">
+            <div className="grid grid-cols-1 gap-6">
+              {styleKeys.map(({ key, label }) => {
+                const style = templateSettings[key as keyof TemplateSettings] as any;
+                
+                return (
+                  <div key={key} className="bg-card-bg border border-slate-700 rounded-xl overflow-hidden shadow-sm">
+                    <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-700 flex justify-between items-center">
+                      <span className="font-bold text-primary text-sm uppercase tracking-wide">{label}</span>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+                      {/* Font & Size */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Fonte</label>
+                        <select 
+                          value={style.font} 
+                          onChange={(e) => {
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).font = e.target.value;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        >
+                          {COMMON_FONTS.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Tamanho (pt)</label>
+                        <input 
+                          type="number" 
+                          value={style.size ?? 12} 
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).size = isNaN(val) ? 0 : val;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Alinhamento</label>
+                        <select 
+                          value={style.alignment ?? 'JUSTIFIED'} 
+                          onChange={(e) => {
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).alignment = e.target.value;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        >
+                          <option value="JUSTIFIED">Justificado</option>
+                          <option value="LEFT">Esquerda</option>
+                          <option value="CENTER">Centro</option>
+                          <option value="RIGHT">Direita</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Espaçamento Linhas</label>
+                        <select 
+                          value={style.lineSpacing ?? 360} 
+                          onChange={(e) => {
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).lineSpacing = Number(e.target.value);
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        >
+                          <option value={240}>Simples</option>
+                          <option value={360}>1.5 Linhas</option>
+                          <option value={480}>Duplo</option>
+                        </select>
+                      </div>
+
+                      {/* Indentation */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Avanço Esq. (mm)</label>
+                        <input 
+                          type="number" 
+                          value={style.indentLeft ?? 0} 
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).indentLeft = isNaN(val) ? 0 : val;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Avanço Dir. (mm)</label>
+                        <input 
+                          type="number" 
+                          value={style.indentRight ?? 0} 
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).indentRight = isNaN(val) ? 0 : val;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Avanço 1ª Linha (mm)</label>
+                        <input 
+                          type="number" 
+                          value={style.indentFirstLine ?? 0} 
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                            const newSettings = {...templateSettings};
+                            (newSettings[key as keyof TemplateSettings] as any).indentFirstLine = isNaN(val) ? 0 : val;
+                            setTemplateSettings(newSettings as TemplateSettings);
+                          }}
+                          className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+
+                      {/* Paragraph Spacing */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-500 uppercase font-bold">Antes (pt)</label>
+                          <input 
+                            type="number" 
+                            value={style.spacingBefore ?? 0} 
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              const newSettings = {...templateSettings};
+                              (newSettings[key as keyof TemplateSettings] as any).spacingBefore = isNaN(val) ? 0 : val;
+                              setTemplateSettings(newSettings as TemplateSettings);
+                            }}
+                            className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-slate-500 uppercase font-bold">Depois (pt)</label>
+                          <input 
+                            type="number" 
+                            value={style.spacingAfter ?? 0} 
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              const newSettings = {...templateSettings};
+                              (newSettings[key as keyof TemplateSettings] as any).spacingAfter = isNaN(val) ? 0 : val;
+                              setTemplateSettings(newSettings as TemplateSettings);
+                            }}
+                            className="w-full bg-input-bg border border-slate-700 rounded px-2 py-1.5 text-xs text-white focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Bold / Italic */}
+                      <div className="flex items-center gap-6 pt-4 md:col-span-4 border-t border-slate-700 mt-2">
+                        <label className="flex items-center gap-2 text-xs text-white cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            checked={style.bold} 
+                            onChange={(e) => {
+                              const newSettings = {...templateSettings};
+                              (newSettings[key as keyof TemplateSettings] as any).bold = e.target.checked;
+                              setTemplateSettings(newSettings as TemplateSettings);
+                            }}
+                            className="w-4 h-4 rounded border-slate-600 bg-input-bg text-primary focus:ring-primary"
+                          /> 
+                          <span className="group-hover:text-primary transition-colors">Negrito</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-white cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            checked={style.italics} 
+                            onChange={(e) => {
+                              const newSettings = {...templateSettings};
+                              (newSettings[key as keyof TemplateSettings] as any).italics = e.target.checked;
+                              setTemplateSettings(newSettings as TemplateSettings);
+                            }}
+                            className="w-4 h-4 rounded border-slate-600 bg-input-bg text-primary focus:ring-primary"
+                          /> 
+                          <span className="group-hover:text-primary transition-colors">Itálico</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="p-6 border-t border-slate-700 bg-slate-800/50 flex justify-end gap-3">
+            <button 
+              onClick={() => setShowSettings(false)}
+              className="px-6 py-2 rounded font-bold text-slate-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <button 
+              onClick={saveTemplateSettings}
+              className="px-6 py-2 rounded bg-primary hover:bg-primary-hover text-white font-bold shadow-lg shadow-primary/20 transition-all"
+            >
+              Guardar Configuração
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderApiKeyScreen = () => (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 animate-fade-in">
+    <div className="flex flex-col items-center justify-center w-full animate-fade-in">
+       <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">Assistente de Acórdãos</h1>
+          <p className="text-slate-400">Tribunal da Relação - Assistência Inteligente</p>
+       </div>
+       
        <div className="bg-card-bg border border-slate-700 p-8 rounded-xl shadow-2xl max-w-md w-full">
           <div className="flex flex-col items-center mb-6">
              <div className="bg-primary/20 p-3 rounded-full mb-4">
@@ -183,6 +525,20 @@ const App: React.FC = () => {
 
     // REVIEW STATE
     if (status === AppStatus.REVIEW && caseData) {
+      const togglePreview = (key: string) => {
+        setPreviews(prev => ({ ...prev, [key]: !prev[key] }));
+      };
+
+      const toggleConclusionPreview = (idx: number) => {
+        setPreviews((prev: any) => ({
+          ...prev,
+          conclusions: {
+            ...(prev.conclusions || {}),
+            [idx]: !prev.conclusions?.[idx]
+          }
+        }));
+      };
+
       return (
         <div className="space-y-6 animate-fade-in pb-8">
            {/* Success Banner */}
@@ -200,45 +556,142 @@ const App: React.FC = () => {
 
           {/* I - Relatorio */}
           <section>
-             <h3 className="text-white text-lg font-bold px-1 pb-3 pt-2">I. Relatório</h3>
+             <div className="flex justify-between items-end px-1 pb-3 pt-2">
+                <h3 className="text-white text-lg font-bold">I. Relatório</h3>
+                <button
+                  onClick={() => togglePreview('report')}
+                  className="text-primary hover:text-primary-hover text-sm font-bold flex items-center gap-1 transition-colors"
+                >
+                  {previews.report ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                </button>
+             </div>
              <div className="bg-card-bg border border-slate-700 rounded-lg p-4 space-y-4">
                 <div className="space-y-2">
                     <label className="text-xs text-slate-400 uppercase font-bold">Texto do Relatório</label>
-                    <textarea
-                      className="w-full h-40 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
-                      placeholder="Conteúdo do relatório..."
-                      value={caseData.report}
-                      onChange={(e) => setCaseData({...caseData, report: e.target.value})}
-                    />
+                    {previews.report ? (
+                       <div className="prose prose-sm prose-invert max-w-none bg-input-bg p-3 rounded min-h-[10rem]">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{caseData.report}</ReactMarkdown>
+                       </div>
+                    ) : (
+                       <textarea
+                         className="w-full h-40 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
+                         placeholder="Conteúdo do relatório..."
+                         value={caseData.report}
+                         onChange={(e) => setCaseData({...caseData, report: e.target.value})}
+                       />
+                    )}
                 </div>
                 
                 <div className="space-y-2 pt-2 border-t border-slate-600">
-                    <label className="text-xs text-slate-400 uppercase font-bold">Decisão da 1ª Instância (Parte final do Relatório)</label>
+                    <div className="flex justify-between items-end mb-1">
+                       <label className="text-xs text-slate-400 uppercase font-bold">Decisão da 1ª Instância</label>
+                       <button
+                         onClick={() => togglePreview('decisionFirstInstance')}
+                         className="text-primary hover:text-primary-hover text-[10px] font-bold flex items-center gap-1 transition-colors"
+                       >
+                         {previews.decisionFirstInstance ? <><Edit2 className="w-2.5 h-2.5" /> Editar</> : <><Eye className="w-2.5 h-2.5" /> Visualizar</>}
+                       </button>
+                    </div>
                     <p className="text-xs text-slate-500 italic mb-1">Será antecedida pela frase: "Foi proferida sentença que"</p>
-                    <textarea
-                      className="w-full h-24 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
-                      placeholder="Decisão da 1ª Instância..."
-                      value={caseData.decisionFirstInstance}
-                      onChange={(e) => setCaseData({...caseData, decisionFirstInstance: e.target.value})}
-                    />
+                    {previews.decisionFirstInstance ? (
+                       <div className="prose prose-sm prose-invert max-w-none bg-input-bg p-3 rounded min-h-[6rem]">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{caseData.decisionFirstInstance}</ReactMarkdown>
+                       </div>
+                    ) : (
+                       <textarea
+                         className="w-full h-24 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y placeholder-slate-500"
+                         placeholder="Decisão da 1ª Instância..."
+                         value={caseData.decisionFirstInstance}
+                         onChange={(e) => setCaseData({...caseData, decisionFirstInstance: e.target.value})}
+                       />
+                    )}
                 </div>
              </div>
           </section>
 
-          {/* II - Factos */}
+          {/* Conclusoes */}
+          <section>
+             <h3 className="text-white text-lg font-bold px-1 pb-3 pt-2">Conclusões dos Recursos (Fim do Relatório)</h3>
+             <div className="space-y-4">
+               {caseData.appealConclusions.map((ac, idx) => (
+                 <div key={idx} className="bg-card-bg border border-slate-700 rounded-lg p-4 space-y-3">
+                    <div className="flex justify-between items-start border-b border-slate-600 pb-2">
+                       <div className="flex items-center gap-3">
+                          <span className="font-bold text-white text-sm">{ac.source}</span>
+                          <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
+                            ac.type === 'RECURSO' ? 'bg-primary/20 text-primary' : 'bg-orange-900/40 text-orange-400'
+                          }`}>
+                            {ac.type}
+                          </span>
+                       </div>
+                       <button
+                         onClick={() => toggleConclusionPreview(idx)}
+                         className="text-primary hover:text-primary-hover text-xs font-bold flex items-center gap-1 transition-colors"
+                       >
+                         {previews.conclusions[idx] ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                       </button>
+                    </div>
+                    {previews.conclusions[idx] ? (
+                       <div className="prose prose-sm prose-invert max-w-none bg-input-bg p-3 rounded min-h-[12rem]">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{ac.content}</ReactMarkdown>
+                       </div>
+                    ) : (
+                       <textarea
+                         className="w-full h-48 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y"
+                         value={ac.content}
+                         onChange={(e) => {
+                           const newConclusions = [...caseData.appealConclusions];
+                           newConclusions[idx] = { ...ac, content: e.target.value };
+                           setCaseData({ ...caseData, appealConclusions: newConclusions });
+                         }}
+                       />
+                    )}
+                 </div>
+               ))}
+             </div>
+          </section>
+
+          {/* II - Objeto do Recurso */}
           <section>
              <div className="flex justify-between items-end px-1 pb-3 pt-2">
-                <h3 className="text-white text-lg font-bold">II. Factos Provados</h3>
+                <h3 className="text-white text-lg font-bold">II. Objeto do Recurso (Questões a Decidir)</h3>
                 <button
-                  onClick={() => setShowPreview(!showPreview)}
+                  onClick={() => togglePreview('appealQuestions')}
                   className="text-primary hover:text-primary-hover text-sm font-bold flex items-center gap-1 transition-colors"
                 >
-                  {showPreview ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                  {previews.appealQuestions ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                </button>
+             </div>
+             <div className="bg-card-bg border border-slate-700 rounded-lg p-4">
+                {previews.appealQuestions ? (
+                   <div className="prose prose-sm prose-invert max-w-none bg-input-bg p-3 rounded min-h-[12rem]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{caseData.appealQuestions}</ReactMarkdown>
+                   </div>
+                ) : (
+                   <textarea
+                     className="w-full h-48 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y"
+                     placeholder="Questões suscitadas em cada recurso..."
+                     value={caseData.appealQuestions}
+                     onChange={(e) => setCaseData({...caseData, appealQuestions: e.target.value})}
+                   />
+                )}
+             </div>
+          </section>
+
+          {/* III - Factos */}
+          <section>
+             <div className="flex justify-between items-end px-1 pb-3 pt-2">
+                <h3 className="text-white text-lg font-bold">III. FUNDAMENTAÇÃO DE FACTO / FACTOS PROVADOS</h3>
+                <button
+                  onClick={() => togglePreview('provenFacts')}
+                  className="text-primary hover:text-primary-hover text-sm font-bold flex items-center gap-1 transition-colors"
+                >
+                  {previews.provenFacts ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
                 </button>
              </div>
              
              <div className="bg-card-bg border border-slate-700 rounded-lg p-4 min-h-[12rem]">
-               {showPreview ? (
+               {previews.provenFacts ? (
                   <div className="prose prose-sm prose-invert max-w-none">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {caseData.provenFacts}
@@ -254,31 +707,61 @@ const App: React.FC = () => {
              </div>
           </section>
 
-          {/* III - Conclusoes */}
+          {/* Factos Não Provados */}
           <section>
-             <h3 className="text-white text-lg font-bold px-1 pb-3 pt-2">III. Conclusões dos Recursos</h3>
-             <div className="space-y-4">
-               {caseData.appealConclusions.map((ac, idx) => (
-                 <div key={idx} className="bg-card-bg border border-slate-700 rounded-lg p-4 space-y-3">
-                    <div className="flex justify-between items-start border-b border-slate-600 pb-2">
-                       <span className="font-bold text-white text-sm">{ac.source}</span>
-                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider ${
-                         ac.type === 'RECURSO' ? 'bg-primary/20 text-primary' : 'bg-orange-900/40 text-orange-400'
-                       }`}>
-                         {ac.type}
-                       </span>
-                    </div>
-                    <textarea
-                      className="w-full h-48 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y"
-                      value={ac.content}
-                      onChange={(e) => {
-                        const newConclusions = [...caseData.appealConclusions];
-                        newConclusions[idx] = { ...ac, content: e.target.value };
-                        setCaseData({ ...caseData, appealConclusions: newConclusions });
-                      }}
-                    />
-                 </div>
-               ))}
+             <div className="flex justify-between items-end px-1 pb-3 pt-2">
+                <h3 className="text-white text-lg font-bold">FACTOS NÃO PROVADOS</h3>
+                <button
+                  onClick={() => togglePreview('unprovenFacts')}
+                  className="text-primary hover:text-primary-hover text-sm font-bold flex items-center gap-1 transition-colors"
+                >
+                  {previews.unprovenFacts ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                </button>
+             </div>
+             
+             <div className="bg-card-bg border border-slate-700 rounded-lg p-4 min-h-[8rem]">
+               {previews.unprovenFacts ? (
+                  <div className="prose prose-sm prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {caseData.unprovenFacts}
+                    </ReactMarkdown>
+                  </div>
+               ) : (
+                  <textarea
+                    className="w-full h-48 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y"
+                    value={caseData.unprovenFacts}
+                    onChange={(e) => setCaseData({...caseData, unprovenFacts: e.target.value})}
+                  />
+               )}
+             </div>
+          </section>
+
+          {/* Factos Impugnados */}
+          <section>
+             <div className="flex justify-between items-end px-1 pb-3 pt-2">
+                <h3 className="text-white text-lg font-bold">Factos Impugnados</h3>
+                <button
+                  onClick={() => togglePreview('impugnedFacts')}
+                  className="text-primary hover:text-primary-hover text-sm font-bold flex items-center gap-1 transition-colors"
+                >
+                  {previews.impugnedFacts ? <><Edit2 className="w-3 h-3" /> Editar</> : <><Eye className="w-3 h-3" /> Visualizar</>}
+                </button>
+             </div>
+             
+             <div className="bg-card-bg border border-slate-700 rounded-lg p-4 min-h-[8rem]">
+               {previews.impugnedFacts ? (
+                  <div className="prose prose-sm prose-invert max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {caseData.impugnedFacts}
+                    </ReactMarkdown>
+                  </div>
+               ) : (
+                  <textarea
+                    className="w-full h-48 bg-input-bg border-none rounded text-slate-200 text-sm focus:ring-1 focus:ring-primary resize-y"
+                    value={caseData.impugnedFacts}
+                    onChange={(e) => setCaseData({...caseData, impugnedFacts: e.target.value})}
+                  />
+               )}
              </div>
           </section>
         </div>
@@ -376,47 +859,71 @@ const App: React.FC = () => {
 
     if (status === AppStatus.REVIEW) {
       return (
-        <div className="grid grid-cols-2 gap-4">
-            <button 
-              onClick={handleReset}
-              className="flex h-12 w-full items-center justify-center rounded bg-slate-700 text-white text-base font-medium transition-colors hover:bg-slate-600 gap-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Novo
-            </button>
-            <button 
-              onClick={handleDownload}
-              className="flex h-12 w-full items-center justify-center rounded bg-primary text-white text-base font-bold transition-colors hover:bg-primary-hover gap-2 shadow-lg shadow-primary/20"
-            >
-              <Download className="w-4 h-4" />
-              Download
-            </button>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={handleReset}
+                className="flex h-12 w-full items-center justify-center rounded bg-slate-700 text-white text-base font-medium transition-colors hover:bg-slate-600 gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Novo
+              </button>
+              <button 
+                onClick={handleDownload}
+                className="flex h-12 w-full items-center justify-center rounded bg-primary text-white text-base font-bold transition-colors hover:bg-primary-hover gap-2 shadow-lg shadow-primary/20"
+              >
+                <Download className="w-4 h-4" />
+                Download Word
+              </button>
+          </div>
+          <button 
+            onClick={handleExportJson}
+            className="flex h-10 w-full items-center justify-center rounded border border-slate-600 text-slate-300 text-sm font-medium transition-colors hover:bg-slate-800 gap-2"
+          >
+            <Save className="w-4 h-4" />
+            Guardar Projeto (JSON)
+          </button>
         </div>
       );
     }
 
     return (
-      <div className="grid grid-cols-2 gap-4">
-          <button 
-            onClick={handleReset}
-             className="flex h-12 w-full items-center justify-center rounded bg-slate-700 text-white text-base font-medium transition-colors hover:bg-slate-600"
-          >
-             Limpar
-          </button>
-         <button 
-            onClick={handleProcess}
-            disabled={!sentenceFile}
-            className={`
-              flex h-12 w-full items-center justify-center rounded text-base font-bold transition-all gap-2
-              ${!sentenceFile 
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
-                : 'bg-primary text-white hover:bg-primary-hover shadow-lg shadow-primary/20'
-              }
-            `}
-         >
-            <FileText className="w-5 h-5" />
-            Selecionar Texto
-         </button>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+            <button 
+              onClick={handleReset}
+               className="flex h-12 w-full items-center justify-center rounded bg-slate-700 text-white text-base font-medium transition-colors hover:bg-slate-600"
+            >
+               Limpar
+            </button>
+           <button 
+              onClick={handleProcess}
+              disabled={!sentenceFile}
+              className={`
+                flex h-12 w-full items-center justify-center rounded text-base font-bold transition-all gap-2
+                ${!sentenceFile 
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' 
+                  : 'bg-primary text-white hover:bg-primary-hover shadow-lg shadow-primary/20'
+                }
+              `}
+           >
+              <FileText className="w-5 h-5" />
+              Analisar Documentos
+           </button>
+        </div>
+        
+        <div className="flex justify-center">
+          <label className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors cursor-pointer text-sm font-medium">
+            <Upload className="w-4 h-4" />
+            <span>Importar Projeto Guardado (JSON)</span>
+            <input 
+              type="file" 
+              accept=".json" 
+              className="hidden" 
+              onChange={handleImportJson}
+            />
+          </label>
+        </div>
       </div>
     );
   };
@@ -424,10 +931,17 @@ const App: React.FC = () => {
   return (
     <div className="relative flex min-h-screen w-full flex-col font-sans bg-app-bg text-white selection:bg-primary selection:text-white">
       
-      {/* Centered Header like image */}
-      <header className="flex flex-col items-center justify-center pt-8 pb-6 px-4 space-y-1 relative">
-         <div className="absolute top-4 right-4">
-           {!showKeyInput && (
+      {/* Centered Header - Only show if API key is set */}
+      {!showKeyInput && (
+        <header className="flex flex-col items-center justify-center pt-8 pb-6 px-4 space-y-1 relative">
+           <div className="absolute top-4 right-4 flex items-center gap-3">
+             <button 
+               onClick={() => setShowSettings(true)}
+               title="Configurações de Modelo"
+               className="text-slate-500 hover:text-primary transition-colors"
+             >
+               <RefreshCw className="w-5 h-5" />
+             </button>
              <button 
                onClick={handleClearKey}
                title="Alterar Chave API"
@@ -435,18 +949,19 @@ const App: React.FC = () => {
              >
                <LogOut className="w-5 h-5" />
              </button>
-           )}
-         </div>
-         <h1 className="text-2xl md:text-3xl font-bold text-center leading-tight">
-           Assistente de Elaboração de Acórdão
-         </h1>
-         <p className="text-slate-400 font-medium text-center text-sm md:text-base">
-           Tribunal da Relação - Assistência Inteligente
-         </p>
-      </header>
+           </div>
+           <h1 className="text-2xl md:text-3xl font-bold text-center leading-tight">
+             Assistente de Elaboração de Acórdão
+           </h1>
+           <p className="text-slate-400 font-medium text-center text-sm md:text-base">
+             Tribunal da Relação - Assistência Inteligente
+           </p>
+        </header>
+      )}
 
       {/* Main Content */}
-      <main className="flex-grow p-4 w-full max-w-3xl mx-auto">
+      <main className={`flex-grow p-4 w-full max-w-3xl mx-auto ${showKeyInput ? 'flex items-center justify-center' : ''}`}>
+        {renderSettingsModal()}
         {!showKeyInput && status === AppStatus.REVIEW && (
           <div className="mb-4">
             <button 
