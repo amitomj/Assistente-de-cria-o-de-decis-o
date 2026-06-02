@@ -54,10 +54,16 @@ const fileToPart = async (file: File): Promise<any> => {
 export const extractCaseData = async (
   apiKey: string,
   sentenceFile: File,
-  appealPairs: AppealPair[]
+  appealPairs: AppealPair[],
+  modelName: string = 'gemini-3.5-flash'
 ): Promise<CaseData> => {
   try {
     if (!apiKey) throw new Error("API Key em falta.");
+    
+    // Validate modelName against supported list or fallback to default
+    const validModel = ['gemini-3.5-flash', 'gemini-3.1-pro-preview'].includes(modelName)
+      ? modelName
+      : 'gemini-3.5-flash';
     
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
@@ -141,7 +147,7 @@ export const extractCaseData = async (
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: validModel,
       contents: [{ parts }],
       config: {
         systemInstruction,

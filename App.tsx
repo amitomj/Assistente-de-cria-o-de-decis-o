@@ -30,13 +30,11 @@ const App: React.FC = () => {
   });
   const [showSettings, setShowSettings] = useState(false);
   const [templateSettings, setTemplateSettings] = useState<TemplateSettings>(DEFAULT_TEMPLATE);
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
 
   useEffect(() => {
-    const storedKey = localStorage.getItem('gemini_api_key');
-    if (storedKey) {
-      setApiKey(storedKey);
-      setShowKeyInput(false);
-    }
+    // Clear any previously saved keys to fully respect the user request
+    localStorage.removeItem('gemini_api_key');
 
     const storedTemplate = localStorage.getItem('template_settings');
     if (storedTemplate) {
@@ -68,13 +66,12 @@ const App: React.FC = () => {
   const handleSaveKey = (e: React.FormEvent) => {
     e.preventDefault();
     if (apiKey.trim()) {
-      localStorage.setItem('gemini_api_key', apiKey.trim());
+      // Kept in state only (memory), never saved to localStorage
       setShowKeyInput(false);
     }
   };
 
   const handleClearKey = () => {
-    localStorage.removeItem('gemini_api_key');
     setApiKey('');
     setShowKeyInput(true);
     setStatus(AppStatus.IDLE);
@@ -115,8 +112,8 @@ const App: React.FC = () => {
     setErrorMsg(null);
 
     try {
-      // Pass the API Key to the service
-      const data = await extractCaseData(apiKey, sentenceFile, appealPairs);
+      // Pass the API Key and selected model to the service
+      const data = await extractCaseData(apiKey, sentenceFile, appealPairs, selectedModel);
       setCaseData(data);
       setStatus(AppStatus.REVIEW);
     } catch (err: any) {
@@ -493,7 +490,7 @@ const App: React.FC = () => {
                Obter chave gratuita no Google AI Studio
              </a>
              <p className="text-center text-xs text-slate-500 mt-2">
-               A chave é guardada apenas no seu navegador.
+               A chave é guardada apenas temporariamente na memória e eliminada ao sair ou fechar a página.
              </p>
           </div>
        </div>
@@ -840,7 +837,48 @@ const App: React.FC = () => {
            </div>
         </section>
 
-        {errorMsg && (
+        {/* Step 3: Selecionar Modelo de IA */}
+         <section className="space-y-3 font-sans">
+            <h3 className="text-white text-lg font-bold px-1">3. Selecionar Modelo de IA</h3>
+            <div className="bg-card-bg border border-slate-700 rounded-lg p-6 space-y-4 shadow-sm">
+               <p className="text-xs text-slate-400 leading-relaxed">
+                  Escolha o modelo Gemini ideal para o tamanho dos seus documentos de sentença e recursos. Caso se depare com erros de limite de capacidade para processos muito extensos, mude para o modelo **Pro** (2M de tokens).
+               </p>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                     type="button"
+                     onClick={() => setSelectedModel('gemini-3.5-flash')}
+                     className={`p-4 rounded-lg border text-left transition-all ${
+                       selectedModel === 'gemini-3.5-flash'
+                         ? 'bg-primary/10 border-primary text-white shadow-md'
+                         : 'bg-input-bg border-slate-700 text-slate-400 hover:border-slate-600'
+                     }`}
+                  >
+                     <div className="font-bold text-sm text-white mb-1">Gemini 3.5 Flash</div>
+                     <div className="text-xs text-slate-400 leading-relaxed">
+                        Ideal para análise rápida e económica de documentos normais. Limite de 1.048.576 tokens.
+                     </div>
+                  </button>
+
+                  <button
+                     type="button"
+                     onClick={() => setSelectedModel('gemini-3.1-pro-preview')}
+                     className={`p-4 rounded-lg border text-left transition-all ${
+                       selectedModel === 'gemini-3.1-pro-preview'
+                         ? 'bg-primary/10 border-primary text-white shadow-md'
+                         : 'bg-input-bg border-slate-700 text-slate-400 hover:border-slate-600'
+                     }`}
+                  >
+                     <div className="font-bold text-sm text-white mb-1">Gemini 3.1 Pro</div>
+                     <div className="text-xs text-slate-400 leading-relaxed">
+                        Maior capacidade de raciocínio jurídico e compreensão de textos imensos. Limite de 2.097.152 tokens.
+                     </div>
+                  </button>
+               </div>
+            </div>
+         </section>
+
+         {errorMsg && (
           <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-lg flex items-start gap-3" role="alert">
             <Info className="w-5 h-5 shrink-0" />
             <div>
