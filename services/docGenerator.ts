@@ -349,14 +349,21 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
         children: [
           // Header / Title
           new Paragraph({
-            text: "PROJETO DE ACÓRDÃO",
-            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+            style: "Normal",
+            children: [
+              new TextRun({
+                text: "Projeto de acórdão",
+                bold: true,
+                size: 28, // 14pt (in half-points)
+              })
+            ]
           }),
 
           // I - Relatório
           new Paragraph({
-            text: "I - RELATÓRIO",
-            heading: HeadingLevel.HEADING_2,
+            text: "I - Relatório",
+            heading: HeadingLevel.HEADING_1,
           }),
           ...parseContent(data.report),
           
@@ -376,26 +383,23 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
           ...data.appealConclusions.flatMap(ac => {
             const paragraphs: (Paragraph | Table)[] = [];
             
-            // If it's a new Appeal (Recurso), add a numbered heading
+            // If it's a new Appeal (Recurso) or Response (Resposta), add a heading styled with Heading 3
             if (ac.type === 'RECURSO') {
               resourceCounter++;
               paragraphs.push(
                 new Paragraph({
-                  text: `Recurso ${resourceCounter}`,
+                  text: `Recurso ${resourceCounter} - ${ac.source}`,
+                  heading: HeadingLevel.HEADING_3,
+                })
+              );
+            } else {
+              paragraphs.push(
+                new Paragraph({
+                  text: `Resposta - ${ac.source}`,
                   heading: HeadingLevel.HEADING_3,
                 })
               );
             }
-
-            // Source identification
-            paragraphs.push(
-              new Paragraph({
-                children: [
-                    new TextRun({ text: ac.source, bold: true })
-                ],
-                style: "Citation",
-              })
-            );
 
             // Content paragraphs (with support for tables in conclusions if any)
             paragraphs.push(...parseContent(ac.content, "Citation"));
@@ -408,8 +412,8 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
 
           // II – Objeto do recurso
           new Paragraph({
-            text: "II – OBJETO DO RECURSO",
-            heading: HeadingLevel.HEADING_2,
+            text: "II - Objeto do recurso",
+            heading: HeadingLevel.HEADING_1,
           }),
           new Paragraph({
             text: "O objeto do recurso é delimitado pelas conclusões da alegação apresentada, não podendo este Tribunal conhecer de matérias nelas não incluídas, sem prejuízo das questões de conhecimento oficioso, que não tenham sido apreciadas com trânsito em julgado e das que se não encontrem prejudicadas pela solução dada a outras [artigos 635.º, n.º 4, 637.º n.º 2, 1ª parte, 639.º, n.ºs 1 e 2, 608.º, n.º 2, do Código de Processo Civil, aplicáveis por força do artigo 87.º, n.º 1, do Código de Processo do Trabalho].",
@@ -432,11 +436,11 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
 
           // III - Fundamentação
           new Paragraph({
-            text: "III - FUNDAMENTAÇÃO DE FACTO",
-            heading: HeadingLevel.HEADING_2,
+            text: "III - Fundamentação de facto",
+            heading: HeadingLevel.HEADING_1,
           }),
           new Paragraph({
-            text: "FACTOS PROVADOS",
+            text: "Factos provados",
             heading: HeadingLevel.HEADING_2,
           }),
           new Paragraph({
@@ -446,18 +450,18 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
           ...parseContent(data.provenFacts, "Citation"),
 
           new Paragraph({
-            text: "FACTOS NÃO PROVADOS",
+            text: "Factos não provados",
             heading: HeadingLevel.HEADING_2,
           }),
-           ...parseContent(data.unprovenFacts || "Nada a consignar.", "Citation"),
+          ...parseContent(data.unprovenFacts || "Nada a consignar.", "Citation"),
 
           // Empty line before next chapter
           new Paragraph({ text: "", style: "Normal" }),
 
           // IV - Direito (Placeholder)
           new Paragraph({
-            text: "IV - FUNDAMENTAÇÃO DE DIREITO",
-            heading: HeadingLevel.HEADING_2,
+            text: "IV - Fundamentação de direito",
+            heading: HeadingLevel.HEADING_1,
           }),
           new Paragraph({
              children: [new TextRun({ text: "[Inserir fundamentação jurídica aqui]", italics: true, color: "808080" })],
@@ -469,8 +473,8 @@ export const generateDocx = async (data: CaseData, template?: TemplateSettings) 
 
           // V - Decisão
           new Paragraph({
-            text: "V - DECISÃO",
-            heading: HeadingLevel.HEADING_2,
+            text: "V - Decisão",
+            heading: HeadingLevel.HEADING_1,
           }),
           new Paragraph({
             children: [new TextRun({ text: "Pelo exposto, acordam os juízes desta secção em...", italics: true })],
